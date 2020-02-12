@@ -1,0 +1,360 @@
+#!/bin/bash
+
+###############
+# Based on :
+# http://www.codership.com/wiki/doku.php?id=monitoring 
+# https://github.com/fridim/galera-status
+
+AUTHOR="Patrice Scheidt <patrice-github@maskme.org>"
+VERSION=1.0
+PROGNAME="galera-status"
+
+margin_left=23
+col_width=34
+keypress=''
+first="true"
+connect_timeout="--connect-timeout=2"
+
+print_help() {
+  cat <<- EOT
+         FILE: $PROGNAME
+        USAGE: $PROGNAME [--help] [--follow] [--hosts=<node1>,<node2>,...] [MySQL options]
+
+      OPTIONS: --help        this help
+               --follow      continuously refresh status
+               --hosts       comma-separated list of node hosts
+
+               By default galera-status will try to resolve the list of hosts, username
+               and password from the local configuration when running on one of the
+               cluster nodes. If you're using another sst-method than "xtrabackup" or
+               "mariabackup", you have to specify username and password manually.
+               If you're running the script from another machine, you can specify the
+               list of hosts using the --hosts parameter.
+
+               In follow-mode you can press 'r' to reset the cluster's replication health
+               status, or 'q' to quit the script.
+
+  
+  DESCRIPTION: $PROGNAME shows status and health of all nodes of a Galera cluster.
+  
+     EXAMPLES: galera-status --hosts=172.0.0.1,172.0.0.2,172.0.0.3 -uuser -psecret --follow
+               galera-status --follow
+  
+      VERSION: $VERSION
+       AUTHOR: $AUTHOR
+EOT
+  exit 0 
+}
+
+colors() {
+  escape="\033";
+
+  black_f="${escape}[30m"; red_f="${escape}[31m"; green_f="${escape}[32m";
+  yellow_f="${escape}[33m"; blue_f="${escape}[34m"; purple_f="${escape}[35m";
+  cyan_f="${escape}[36m"; white_f="${escape}[37m"; gray_f="${escape}[30m";
+
+  black_b="${escape}[40m"; red_b="${escape}[41m"; green_b="${escape}[42m";
+  yellow_b="${escape}[43m"; blue_b="${escape}[44m"; purple_b="${escape}[45m";
+  cyan_b="${escape}[46m"; white_b="${escape}[47m";
+
+  bold_on="${escape}[1m"; bold_off="${escape}[22m";
+  italic_on="${escape}[3m"; italics_off="${escape}[23m";
+  underline_on="${escape}[4m"; underline_off="${escape}[24m";
+  blink_on="${escape}[5m"; blink_off="${escape}[25m";
+  invert_on="${escape}[7m"; invert_off="${escape}[27m";
+
+  reset_c="${escape}[0m";
+} 
+
+pos() {
+  echo "${escape}[$1;${col}H"
+}
+
+print_header() {
+  divider_size=$(( margin_left + host_count * col_width))
+  col=0
+  echo -e "$(pos 1)${bold_on}${gray_f}$(hr $divider_size '-')
+NODE INFORMATION:${reset_c}
+
+host...............:
+mysqld reachable...:
+node name..........:
+last updated.......:
+${bold_on}${gray_f}$(hr $divider_size '-')
+${gray_f}${bold_on}NODE STATUS:${reset_c}
+
+cluster status.....:
+cluster size.......:
+node/cluster weight:
+ready..............:
+connected..........:
+state comment......:
+${bold_on}${gray_f}$(hr $divider_size '-')
+REPLICATION HEALTH (The lower the better)${reset_c}
+
+flow control paused:
+flow control sent..:
+send queue avg.....:
+recv queue avg.....:
+potential # threads:
+${bold_on}${gray_f}$(hr $divider_size '-')
+CLUSTER INTEGRITY ${gray_f}(should be the same on all nodes)${reset_c}
+
+cluster config ID..:
+last committed.....:
+${bold_on}${gray_f}$(hr $divider_size '-')${reset_c}
+"
+}
+
+print_values() {
+  for (( i=0; i<$host_count; i++)); do
+    col=$((i * col_width + margin_left + 20))
+    echo -e "$(pos 7) "
+  done
+
+  col=$(( col_width * counter + margin_left))
+  echo -e "
+$(pos 4)$(hr $col_width ' ')$(pos 4)$host
+$(pos 5)$(hr $col_width ' ')$(pos 5)$reachable
+$(pos 6)$(hr $col_width ' ')$(pos 6)$node_name
+$(pos 7)$(hr $col_width ' ')$(pos 7)$(date '+%Y-%m-%d %H:%M:%S') *
+$(pos 11)$(hr $col_width ' ')$(pos 11)$cluster_status
+$(pos 12)$(hr $col_width ' ')$(pos 12)$cluster_size
+$(pos 13)$(hr $col_width ' ')$(pos 13)$node_weight
+$(pos 14)$(hr $col_width ' ')$(pos 14)$ready
+$(pos 15)$(hr $col_width ' ')$(pos 15)$connected
+$(pos 16)$(hr $col_width ' ')$(pos 16)$local_state_comment
+$(pos 20)$(hr $col_width ' ')$(pos 20)$flow_control_paused
+$(pos 21)$(hr $col_width ' ')$(pos 21)$flow_control_sent
+$(pos 22)$(hr $col_width ' ')$(pos 22)$local_send_queue_avg
+$(pos 23)$(hr $col_width ' ')$(pos 23)$local_recv_queue_avg
+$(pos 24)$(hr $col_width ' ')$(pos 24)$cert_deps_distance
+$(pos 28)$(hr $col_width ' ')$(pos 28)$cluster_conf_id_out
+$(pos 29)$(hr $col_width ' ')$(pos 29)$last_committed
+"
+}
+
+hr() {
+  for (( i=0; i<$1; i++)); do
+    printf "$2"
+  done
+}
+
+unsci() {
+  shopt -s extglob
+  unscivalue=$(bc -l <<< $(sed -E 's/([+-]?[0-9.]+)[eE]\+?(-?)([0-9]+)/(\1*10^\2\3)/g' <<< $1))
+  # trim some trailing zeros
+  echo "${unscivalue%%+(00)}"
+  shopt -u extglob
+}
+
+getValueFromProviderOptions() {
+  po_value=$(echo $provider_options | tr ';' '\n' | grep $1 | cut -d '=' -f2)
+  echo $po_value
+}
+
+showStatus() {
+  node_name=""
+  reachable="${bold_on}${red_f}OFFLINE${reset_c}"
+  cluster_status=""
+  cluster_size=""
+  ready=""
+  connected=""
+  local_state_comment=""
+  flow_control_paused=""
+  flow_control_sent=""
+  local_send_queue_avg=""
+  local_recv_queue_avg=""
+  cert_deps_distance=""
+  cluster_conf_id=""
+  last_committed=""
+  provider_options=""
+  node_weight=""
+
+  while read line; do
+    varname=$(echo "$line" | cut -f 1)
+    varname=${varname/wsrep_}
+    value=$(echo "$line" | cut -f 2|sed "s/'//g")
+    eval "$varname='$value'"
+  done < <(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW STATUS LIKE 'wsrep_%';" 2> /dev/null)
+
+  while read line; do
+    varname=$(echo "$line" | cut -f 1)
+    varname=${varname/wsrep_}
+    value=$(echo "$line" | cut -f 2|sed "s/'//g")
+    eval "$varname='$value'"
+  done < <(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW VARIABLES LIKE 'wsrep_%';" 2> /dev/null) 
+
+  if [[ $cluster_status == 'Primary' ]]; then
+    cluster_status="${bold_on}${green_f}$cluster_status${reset_c}"
+  else
+    cluster_status="${bold_on}${red_f}$cluster_status${reset_c}"
+  fi
+
+  if [[ $ready == 'ON' ]]; then
+    ready="${bold_on}${green_f}$ready${reset_c}"
+  else
+    ready="${bold_on}${red_f}$ready${reset_c}"
+  fi
+
+  if [[ $connected == 'ON' ]]; then
+    connected="${bold_on}${green_f}$connected${reset_c}"
+  else
+    connected="${bold_on}${red_f}$connected${reset_c}"
+  fi
+
+  case "$local_state_comment" in
+    Joining)
+      local_state_comment="${bold_on}${yellow_f}$local_state_comment${reset_c}" ;;
+    Waiting\ for\ SST)
+      local_state_comment="${bold_on}${yellow_f}$local_state_comment${reset_c}" ;;
+    Joined)
+      local_state_comment="${bold_on}${yellow_f}$local_state_comment${reset_c}" ;;
+    Donor)
+      local_state_comment="${bold_on}${yellow_f}$local_state_comment${reset_c}" ;;
+    Synced)
+      local_state_comment="${bold_on}${green_f}$local_state_comment${reset_c}" ;;
+    *)
+      local_state_comment="${bold_on}${red_f}$local_state_comment${reset_c}" ;;
+  esac
+
+  if [[ "$flow_control_paused" != "" ]]; then
+    flow_control_paused=$(unsci $flow_control_paused)
+    if [[ $(bc -l <<< $flow_control_paused*10) > '1' ]]; then
+      flow_control_paused="${bold_on}${red_f}$flow_control_paused${reset_c}"
+    fi 
+  fi
+
+  if [[ "$local_send_queue_avg" != "" ]]; then
+    local_send_queue_avg=$(unsci $local_send_queue_avg)
+    if [[ $(bc -l <<< $local_send_queue_avg*10) > '1' ]]; then
+      local_send_queue_avg="${bold_on}${red_f}$local_send_queue_avg (slow network?)${reset_c}"
+    fi 
+  fi
+
+  if [[ "$local_recv_queue_avg" != "" ]]; then
+    local_recv_queue_avg=$(unsci $local_recv_queue_avg)
+    if [[ $(bc -l <<< $local_recv_queue_avg*10) > '1' ]]; then
+      local_recv_queue_avg="${bold_on}${red_f}$local_recv_queue_avg (slow network?)${reset_c}"
+    fi 
+  fi
+
+  if [[ "$node_name" != "" ]]; then
+    reachable="${bold_on}${green_f}ONLINE${reset_c}"
+  fi
+
+  if [[ "$provider_options" != "" ]]; then
+    node_weight=$(getValueFromProviderOptions pc.weight)/$cluster_weight
+  fi
+
+  cluster_conf_id_out=${bold_on}${green_f}$cluster_conf_id${reset_c}
+  last_cluster_conf_ids[$counter]=$cluster_conf_id
+  if [[ "$cluster_conf_id" != "" ]]; then
+    for (( c=0;c<$host_count;c++ )); do
+      if [[ "${last_cluster_conf_ids[c]}" != "" ]]; then
+        if [[ ${last_cluster_conf_ids[c]} != $cluster_conf_id ]]; then
+          cluster_conf_id_out=${bold_on}${red_f}$cluster_conf_id${reset_c}
+        fi
+      fi
+    done
+  fi
+
+  if [[ "$first" == "true" ]]; then
+    print_header
+    first="false"
+  fi
+  print_values
+}
+
+#
+# parse parameters
+#
+mysql_options=()
+for i in "$@"; do
+  case $i in
+    --help)
+    print_help
+    exit 0
+    ;;
+    --hosts=*)
+    hosts="${i#*=}"
+    shift
+    ;;
+    --follow)
+    follow="true"
+    shift
+    ;;
+    *)
+    mysql_options+=("$i")
+    shift
+    ;;
+  esac
+done
+set -- "${mysql_options[@]}"
+
+colors
+clear
+
+if [[ "$follow" == "true" ]]; then
+  col=0
+  echo -e "$(pos 31)${invert_on}Commands: Q -> Quit | R -> Reset replication health status${reset_c}"
+fi
+
+if [[ "$hosts" != "" ]]; then
+  hosts=${hosts//,/ }
+else
+  localconfig=$(mysqld --verbose --help 2> /dev/null | grep -e "^wsrep")
+
+  hosts=$(echo -e "$localconfig" | grep gcomm:// | cut -d/ -f3 | tr ',' ' ')
+  sst_method=$(echo -e "$localconfig" | grep sst-method | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)
+  if [[ "$sst_method" == "mariabackup" || "$sst_method" == "xtrabackup" ]]; then
+    username="-u$(echo -e "$localconfig" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)"
+    password="-p$(echo -e "$localconfig" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f2)"
+  fi
+fi
+host_count=$(wc -w < <(echo $hosts))
+
+if [[ $@ == *"-u"* || $@ = *"--user"* ]]; then
+  username=""
+fi
+if [[ $@ == *"-p"* || $@ = *"--password"* ]]; then
+  password=""
+fi
+
+if [[ $@ = *"--connect-timeout="* ]]; then
+  connect_timeout=""
+fi
+
+if [ -t 0 ]; then
+  SAVED_STTY="`stty -g`"
+  stty -echo -icanon -icrnl time 0 min 0
+fi
+
+declare -a last_cluster_conf_ids
+last_cluster_conf_ids=()
+for (( c=0;c < $host_count; c++)); do
+  last_cluster_conf_ids+=""
+done
+
+while [ "x$keypress" != "xq" ]; do
+  counter=0
+  for host in $hosts; do
+    showStatus $@
+    counter=$((counter+1))
+    keypress="`cat -v`"
+    if [[ "x$keypress" == "xq" || "x$keypress" == "xQ" ]]; then
+      break;
+    elif [[ "x$keypress" == "xr" || "x$keypress" == "xR" ]]; then
+      mysql "$@" -h$host $connect_timeout $username $password -N -B -e "FLUSH STATUS;" 2> /dev/null
+    fi
+  done
+  if [[ "$follow" != "true" ]]; then
+    break
+  fi
+done
+
+if [ -t 0 ]; then stty "$SAVED_STTY"; fi
+col=0
+echo -e "$(pos 31)                                                                "
+
+exit 0
