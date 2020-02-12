@@ -24,3 +24,7 @@ or 'q' to quit the script.
 
 # Screenshot
 ![screenshot](screenshot.png)
+
+Based on:
+* http://www.codership.com/wiki/doku.php?id=monitoring 
+* https://github.com/fridim/galera-status
