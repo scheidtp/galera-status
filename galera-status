@@ -322,17 +322,14 @@ changeWeight() {
     echo -e "$(pos 31)${red_b}ERROR: Not a valid nodeID - $in_nodeID is not a number between 0 and $((host_count-1))${reset_c}"
     in_nodeID=99
     sleep 3
-    printCommands
   elif [[ $in_nodeID < 0 ]]; then
     echo -e "$(pos 31)${red_b}ERROR: Not a valid nodeID $in_nodeID < 0${reset_c}"
     in_nodeID=99
     sleep 3
-    printCommands
   elif [[ $in_nodeID > $(( host_count-1 )) ]] ; then
     echo -e "$(pos 31)${red_b}ERROR: Not a valid nodeID $in_nodeID > ${reset_c}"
     in_nodeID=99
     sleep 3
-    printCommands
   else
     echo -e "$(pos 31)$(hr divider_size ' ')$(pos 30)"
     read -p 'Enter node weight: ' in_weight
@@ -341,10 +338,10 @@ changeWeight() {
       in_nodeID=99
       echo -e "$(pos 31)${red_b}ERROR: Not a valid node weight <$in_weight>${reset_c}"
       sleep 3
-      printCommands
     fi
   fi
 
+  printCommands
   saveTTY
 }
 
@@ -355,12 +352,11 @@ setWeight() {
     stmt_error=$( { mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SET GLOBAL wsrep_provider_options='pc.weight=$in_weight';"; } 2>&1)
     if [[ $? -ne 0 ]]; then
       echo -e "$(pos 31)$(hr divider_size ' ')$(pos 31)${red_b}ERROR: Failed setting node weight - $stmt_error${reset_c}"
-      sleep 3
-      echo -e "$(pos 31)$(hr divider_size ' ')"
       in_nodeID=-99
     else 
-      sleep 1
+      in_nodeID=99
     fi
+    sleep 3
     printCommands
   fi
 }
@@ -440,7 +436,10 @@ else
 fi
 host_count=$(wc -w < <(echo $hosts))
 
-checkPrivileges
+for host in $hosts; do
+  checkPrivileges
+  break;
+done
 
 if [[ "$follow" == "true" ]]; then
   printCommands
