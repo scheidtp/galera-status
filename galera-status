@@ -6,11 +6,16 @@
 # https://github.com/fridim/galera-status
 
 AUTHOR="Patrice Scheidt <patrice-github@maskme.org>"
-VERSION=1.0
+VERSION=1.1
 PROGNAME="galera-status"
 
 margin_left=23
 col_width=34
+last_terminal_width=0
+width_needed=1000
+
+in_nodeID=99
+
 keypress=''
 first="true"
 connect_timeout="--connect-timeout=2"
@@ -71,17 +76,16 @@ pos() {
 }
 
 print_header() {
-  divider_size=$(( margin_left + host_count * col_width))
   col=0
-  echo -e "$(pos 1)${bold_on}${gray_f}$(hr $divider_size '-')
-NODE INFORMATION:${reset_c}
+  echo -e "
+${bold_on}${gray_f}$(pos 2)NODE INFORMATION:${reset_c}
 
 host...............:
 mysqld reachable...:
 node name..........:
 last updated.......:
-${bold_on}${gray_f}$(hr $divider_size '-')
-${gray_f}${bold_on}NODE STATUS:${reset_c}
+
+${bold_on}${gray_f}NODE STATUS:${reset_c}
 
 cluster status.....:
 cluster size.......:
@@ -89,27 +93,33 @@ node/cluster weight:
 ready..............:
 connected..........:
 state comment......:
-${bold_on}${gray_f}$(hr $divider_size '-')
-REPLICATION HEALTH (The lower the better)${reset_c}
+
+${bold_on}${gray_f}REPLICATION HEALTH (The lower the better)${reset_c}
 
 flow control paused:
 flow control sent..:
 send queue avg.....:
 recv queue avg.....:
 potential # threads:
-${bold_on}${gray_f}$(hr $divider_size '-')
-CLUSTER INTEGRITY ${gray_f}(should be the same on all nodes)${reset_c}
+
+${bold_on}${gray_f}CLUSTER INTEGRITY (should be the same on all nodes)${reset_c}
 
 cluster config ID..:
 last committed.....:
-${bold_on}${gray_f}$(hr $divider_size '-')${reset_c}
 "
 }
 
+print_dividers() {
+  divider_size=$(( margin_left + host_count * col_width))
+  col=0
+  echo -e "$(pos 1)${bold_on}${gray_f}$(hr $divider_size '-')$(pos 8)$(hr $divider_size '-')$(pos 17)$(hr $divider_size '-')$(pos 25)$(hr $divider_size '-')$(pos 30)$(hr $divider_size '-')${reset_c}"
+}
+
 print_values() {
+  # Removes last-updated-marker
   for (( i=0; i<$host_count; i++)); do
-    col=$((i * col_width + margin_left + 20))
-    echo -e "$(pos 7) "
+    col=$((i * col_width + margin_left + ${#update_date}))
+    echo -e "$(pos 7)  "
   done
 
   col=$(( col_width * counter + margin_left))
@@ -117,7 +127,7 @@ print_values() {
 $(pos 4)$(hr $col_width ' ')$(pos 4)$host
 $(pos 5)$(hr $col_width ' ')$(pos 5)$reachable
 $(pos 6)$(hr $col_width ' ')$(pos 6)$node_name
-$(pos 7)$(hr $col_width ' ')$(pos 7)$(date '+%Y-%m-%d %H:%M:%S') *
+$(pos 7)$(hr $col_width ' ')$(pos 7)$update_date *
 $(pos 11)$(hr $col_width ' ')$(pos 11)$cluster_status
 $(pos 12)$(hr $col_width ' ')$(pos 12)$cluster_size
 $(pos 13)$(hr $col_width ' ')$(pos 13)$node_weight
@@ -153,7 +163,8 @@ getValueFromProviderOptions() {
   echo $po_value
 }
 
-showStatus() {
+update_variables() {
+  max_len=$(( col_width - 1 ))
   node_name=""
   reachable="${bold_on}${red_f}OFFLINE${reset_c}"
   cluster_status=""
@@ -171,24 +182,27 @@ showStatus() {
   provider_options=""
   node_weight=""
 
+  update_date=$(date '+%H:%M:%S')
+  update_date=${update_date:0:$((max_len-2))}
+
   while read line; do
     varname=$(echo "$line" | cut -f 1)
     varname=${varname/wsrep_}
-    value=$(echo "$line" | cut -f 2|sed "s/'//g")
+    value=$(echo "$line" | cut -f 2 | sed "s/'//g")
     eval "$varname='$value'"
   done < <(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW STATUS LIKE 'wsrep_%';" 2> /dev/null)
 
   while read line; do
     varname=$(echo "$line" | cut -f 1)
     varname=${varname/wsrep_}
-    value=$(echo "$line" | cut -f 2|sed "s/'//g")
+    value=$(echo "$line" | cut -f 2 | sed "s/'//g")
     eval "$varname='$value'"
   done < <(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW VARIABLES LIKE 'wsrep_%';" 2> /dev/null) 
 
   if [[ $cluster_status == 'Primary' ]]; then
-    cluster_status="${bold_on}${green_f}$cluster_status${reset_c}"
+    cluster_status="${bold_on}${green_f}${cluster_status:0:$max_len}${reset_c}"
   else
-    cluster_status="${bold_on}${red_f}$cluster_status${reset_c}"
+    cluster_status="${bold_on}${red_f}${cluster_status:0:$max_len}${reset_c}"
   fi
 
   if [[ $ready == 'ON' ]]; then
@@ -205,37 +219,43 @@ showStatus() {
 
   case "$local_state_comment" in
     Joining)
-      local_state_comment="${bold_on}${yellow_f}$local_state_comment${reset_c}" ;;
+      local_state_comment="${bold_on}${yellow_f}${local_state_comment:0:$max_len}${reset_c}" ;;
     Waiting\ for\ SST)
-      local_state_comment="${bold_on}${yellow_f}$local_state_comment${reset_c}" ;;
+      local_state_comment="${bold_on}${yellow_f}${local_state_comment:0:$max_len}${reset_c}" ;;
     Joined)
-      local_state_comment="${bold_on}${yellow_f}$local_state_comment${reset_c}" ;;
+      local_state_comment="${bold_on}${yellow_f}${local_state_comment:0:$max_len}${reset_c}" ;;
     Donor)
-      local_state_comment="${bold_on}${yellow_f}$local_state_comment${reset_c}" ;;
+      local_state_comment="${bold_on}${yellow_f}${local_state_comment:0:$max_len}${reset_c}" ;;
     Synced)
-      local_state_comment="${bold_on}${green_f}$local_state_comment${reset_c}" ;;
+      local_state_comment="${bold_on}${green_f}${local_state_comment:0:$max_len}${reset_c}" ;;
     *)
-      local_state_comment="${bold_on}${red_f}$local_state_comment${reset_c}" ;;
+      local_state_comment="${bold_on}${red_f}${local_state_comment:0:$max_len}${reset_c}" ;;
   esac
 
   if [[ "$flow_control_paused" != "" ]]; then
     flow_control_paused=$(unsci $flow_control_paused)
     if [[ $(bc -l <<< $flow_control_paused*10) > '1' ]]; then
-      flow_control_paused="${bold_on}${red_f}$flow_control_paused${reset_c}"
-    fi 
+      flow_control_paused="${bold_on}${red_f}${flow_control_paused:0:$max_len}${reset_c}"
+    else
+      flow_control_paused=${flow_control_paused:0:$max_len}
+    fi
   fi
 
   if [[ "$local_send_queue_avg" != "" ]]; then
     local_send_queue_avg=$(unsci $local_send_queue_avg)
     if [[ $(bc -l <<< $local_send_queue_avg*10) > '1' ]]; then
-      local_send_queue_avg="${bold_on}${red_f}$local_send_queue_avg (slow network?)${reset_c}"
-    fi 
+      local_send_queue_avg="${bold_on}${red_f}${local_send_queue_avg:0:$max_len}${reset_c}"
+    else
+      local_send_queue_avg=${local_send_queue_avg:0:$max_len}
+    fi
   fi
 
   if [[ "$local_recv_queue_avg" != "" ]]; then
     local_recv_queue_avg=$(unsci $local_recv_queue_avg)
     if [[ $(bc -l <<< $local_recv_queue_avg*10) > '1' ]]; then
-      local_recv_queue_avg="${bold_on}${red_f}$local_recv_queue_avg (slow network?)${reset_c}"
+      local_recv_queue_avg="${bold_on}${red_f}${local_recv_queue_avg:0:$max_len}${reset_c}"
+    else
+      local_recv_queue_avg=${local_recv_queue_avg:0:$max_len}
     fi 
   fi
 
@@ -247,23 +267,134 @@ showStatus() {
     node_weight=$(getValueFromProviderOptions pc.weight)/$cluster_weight
   fi
 
-  cluster_conf_id_out=${bold_on}${green_f}$cluster_conf_id${reset_c}
+  cluster_conf_id_out=${bold_on}${green_f}${cluster_conf_id:0:max_len}${reset_c}
   last_cluster_conf_ids[$counter]=$cluster_conf_id
   if [[ "$cluster_conf_id" != "" ]]; then
     for (( c=0;c<$host_count;c++ )); do
       if [[ "${last_cluster_conf_ids[c]}" != "" ]]; then
         if [[ ${last_cluster_conf_ids[c]} != $cluster_conf_id ]]; then
-          cluster_conf_id_out=${bold_on}${red_f}$cluster_conf_id${reset_c}
+          cluster_conf_id_out=${bold_on}${red_f}${cluster_conf_id:0:max_len}${reset_c}
         fi
       fi
     done
   fi
+}
 
+showStatus() {
+  update_variables "$@"
   if [[ "$first" == "true" ]]; then
     print_header
     first="false"
   fi
   print_values
+}
+
+saveTTY() {
+  if [ -t 0 ]; then
+    SAVED_STTY="`stty -g`"
+    stty -echo -icanon -icrnl time 0 min 0
+  fi
+}
+
+resetTTY() {
+  if [ -t 0 ]; then stty "$SAVED_STTY"; fi
+}
+
+flushStatus() {
+  stmt_error=$( { mysql "$@" -h$host $username $password $connect_timeout -N -B -e "FLUSH STATUS;"; } 2>&1)
+  if [[ $? -ne 0 ]]; then
+    col=0
+    echo -e "$(pos 31)$(hr divider_size ' ')$(pos 31)${red_b}ERROR: Failed flushing replication health status - $stmt_error${reset_c}"
+    sleep 3
+    echo -e "$(pos 31)$(hr divider_size ' ')"
+    printCommands
+  fi
+}
+
+changeWeight() {
+  resetTTY
+  col=0
+  echo -e "$(pos 31)$(hr divider_size ' ')$(pos 30)"
+  read -p 'Enter node ID: ' in_nodeID
+
+  re='^[0-9]+$'
+  if ! [[ $in_nodeID =~ $re ]] ; then
+    echo -e "$(pos 31)${red_b}ERROR: Not a valid nodeID - $in_nodeID is not a number between 0 and $((host_count-1))${reset_c}"
+    in_nodeID=99
+    sleep 3
+    printCommands
+  elif [[ $in_nodeID < 0 ]]; then
+    echo -e "$(pos 31)${red_b}ERROR: Not a valid nodeID $in_nodeID < 0${reset_c}"
+    in_nodeID=99
+    sleep 3
+    printCommands
+  elif [[ $in_nodeID > $(( host_count-1 )) ]] ; then
+    echo -e "$(pos 31)${red_b}ERROR: Not a valid nodeID $in_nodeID > ${reset_c}"
+    in_nodeID=99
+    sleep 3
+    printCommands
+  else
+    echo -e "$(pos 31)$(hr divider_size ' ')$(pos 30)"
+    read -p 'Enter node weight: ' in_weight
+
+    if ! [[ $in_weight =~ $re ]] ; then
+      in_nodeID=99
+      echo -e "$(pos 31)${red_b}ERROR: Not a valid node weight <$in_weight>${reset_c}"
+      sleep 3
+      printCommands
+    fi
+  fi
+
+  saveTTY
+}
+
+setWeight() {
+  if [[ $counter -eq $in_nodeID ]]; then
+    col=0
+    echo -e "$(pos 31)$(hr divider_size ' ')$(pos 31)Changing weight of node $in_nodeID to $in_weight..."
+    stmt_error=$( { mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SET GLOBAL wsrep_provider_options='pc.weight=$in_weight';"; } 2>&1)
+    if [[ $? -ne 0 ]]; then
+      echo -e "$(pos 31)$(hr divider_size ' ')$(pos 31)${red_b}ERROR: Failed setting node weight - $stmt_error${reset_c}"
+      sleep 3
+      echo -e "$(pos 31)$(hr divider_size ' ')"
+      in_nodeID=-99
+    else 
+      sleep 1
+    fi
+    printCommands
+  fi
+}
+
+printCommands() {
+  col=0
+  if [[ $in_nodeID -eq -99 ]]; then
+    echo -e "$(pos 31)${invert_on}Commands: Q -> Quit | R -> Reset replication health status${reset_c}"
+  else
+    echo -e "$(pos 31)${invert_on}Commands: Q -> Quit | W -> Change node weight | R -> Reset replication health status${reset_c}"
+  fi
+}
+
+update_terminal_width() {
+  terminal_width=$(stty size | cut -d' ' -f2)
+  if [[ $terminal_width -ne $last_terminal_width ]]; then
+    clear
+    printCommands
+    print_header
+    last_terminal_width=$terminal_width
+    col_width=$(( (terminal_width - margin_left) / host_count ))
+    if [[ $col_width > 34 ]]; then
+      col_width=34
+    fi
+    width_needed=$(( margin_left + col_width * host_count))
+    print_dividers
+  fi
+}
+
+checkPrivileges() {
+  grants=$(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW GRANTS;" 2> /dev/null)
+  if ! [[ $grants == *"ALL PRIVILEGES"* || $grants = *"SYSTEM_VARIABLES_ADMIN"* || $grants = *"SUPER"* ]]; then
+    in_nodeID=-99
+  fi
 }
 
 #
@@ -295,11 +426,6 @@ set -- "${mysql_options[@]}"
 colors
 clear
 
-if [[ "$follow" == "true" ]]; then
-  col=0
-  echo -e "$(pos 31)${invert_on}Commands: Q -> Quit | R -> Reset replication health status${reset_c}"
-fi
-
 if [[ "$hosts" != "" ]]; then
   hosts=${hosts//,/ }
 else
@@ -314,6 +440,12 @@ else
 fi
 host_count=$(wc -w < <(echo $hosts))
 
+checkPrivileges
+
+if [[ "$follow" == "true" ]]; then
+  printCommands
+fi
+
 if [[ $@ == *"-u"* || $@ = *"--user"* ]]; then
   username=""
 fi
@@ -325,10 +457,7 @@ if [[ $@ = *"--connect-timeout="* ]]; then
   connect_timeout=""
 fi
 
-if [ -t 0 ]; then
-  SAVED_STTY="`stty -g`"
-  stty -echo -icanon -icrnl time 0 min 0
-fi
+saveTTY
 
 declare -a last_cluster_conf_ids
 last_cluster_conf_ids=()
@@ -339,13 +468,20 @@ done
 while [ "x$keypress" != "xq" ]; do
   counter=0
   for host in $hosts; do
+    update_terminal_width
+
+    setWeight $@
     showStatus $@
     counter=$((counter+1))
     keypress="`cat -v`"
     if [[ "x$keypress" == "xq" || "x$keypress" == "xQ" ]]; then
       break;
     elif [[ "x$keypress" == "xr" || "x$keypress" == "xR" ]]; then
-      mysql "$@" -h$host $connect_timeout $username $password -N -B -e "FLUSH STATUS;" 2> /dev/null
+      flushStatus 
+    elif [[ "x$keypress" == "xw" || "x$keypress" == "xW" ]]; then
+      if [[ $in_nodeID -ne -99 ]]; then
+        changeWeight
+      fi
     fi
   done
   if [[ "$follow" != "true" ]]; then
@@ -353,8 +489,9 @@ while [ "x$keypress" != "xq" ]; do
   fi
 done
 
-if [ -t 0 ]; then stty "$SAVED_STTY"; fi
+resetTTY
+
 col=0
-echo -e "$(pos 31)                                                                "
+echo -e "$(pos 31)$(hr divider_size ' ')"
 
 exit 0
