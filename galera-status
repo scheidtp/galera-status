@@ -9,12 +9,14 @@ AUTHOR="Patrice Scheidt <patrice-github@maskme.org>"
 VERSION=1.1
 PROGNAME="galera-status"
 
-margin_left=23
+UNSPECIFIED_NODE=99
+UPDATE_WEIGHT_ERROR=-1
+MARGIN_LEFT=23
+
 col_width=34
 last_terminal_width=0
 width_needed=1000
-
-in_nodeID=99
+in_node_index=$UNSPECIFIED_NODE
 
 keypress=''
 first="true"
@@ -37,7 +39,12 @@ print_help() {
                list of hosts using the --hosts parameter.
 
                In follow-mode you can press 'r' to reset the cluster's replication health
-               status, or 'q' to quit the script.
+               status or 'q' to quit the script. You can also change a node's weight by
+               pressing 'w', if the database account used has the privilege to change
+               global variables.  When chaning a node's weight, the script asks for the
+               node's index and new weight. The first node has the index **0**, the second
+               node hast the index **1** and so on. The node's weight must be specified as
+               integer value >= 0.
 
   
   DESCRIPTION: $PROGNAME shows status and health of all nodes of a Galera cluster.
@@ -51,7 +58,7 @@ EOT
   exit 0 
 }
 
-colors() {
+init_colors() {
   escape="\033";
 
   black_f="${escape}[30m"; red_f="${escape}[31m"; green_f="${escape}[32m";
@@ -110,7 +117,7 @@ last committed.....:
 }
 
 print_dividers() {
-  divider_size=$(( margin_left + host_count * col_width))
+  divider_size=$(( MARGIN_LEFT + host_count * col_width))
   col=0
   echo -e "$(pos 1)${bold_on}${gray_f}$(hr $divider_size '-')$(pos 8)$(hr $divider_size '-')$(pos 17)$(hr $divider_size '-')$(pos 25)$(hr $divider_size '-')$(pos 30)$(hr $divider_size '-')${reset_c}"
 }
@@ -118,11 +125,11 @@ print_dividers() {
 print_values() {
   # Removes last-updated-marker
   for (( i=0; i<$host_count; i++)); do
-    col=$((i * col_width + margin_left + ${#update_date}))
+    col=$((i * col_width + MARGIN_LEFT + ${#update_date}))
     echo -e "$(pos 7)  "
   done
 
-  col=$(( col_width * counter + margin_left))
+  col=$(( col_width * counter + MARGIN_LEFT))
   echo -e "
 $(pos 4)$(hr $col_width ' ')$(pos 4)$host
 $(pos 5)$(hr $col_width ' ')$(pos 5)$reachable
@@ -158,7 +165,7 @@ unsci() {
   shopt -u extglob
 }
 
-getValueFromProviderOptions() {
+get_value_from_provider_options() {
   po_value=$(echo $provider_options | tr ';' '\n' | grep $1 | cut -d '=' -f2)
   echo $po_value
 }
@@ -264,7 +271,7 @@ update_variables() {
   fi
 
   if [[ "$provider_options" != "" ]]; then
-    node_weight=$(getValueFromProviderOptions pc.weight)/$cluster_weight
+    node_weight=$(get_value_from_provider_options pc.weight)/$cluster_weight
   fi
 
   cluster_conf_id_out=${bold_on}${green_f}${cluster_conf_id:0:max_len}${reset_c}
@@ -280,7 +287,7 @@ update_variables() {
   fi
 }
 
-showStatus() {
+show_status() {
   update_variables "$@"
   if [[ "$first" == "true" ]]; then
     print_header
@@ -289,81 +296,81 @@ showStatus() {
   print_values
 }
 
-saveTTY() {
+save_tty() {
   if [ -t 0 ]; then
     SAVED_STTY="`stty -g`"
     stty -echo -icanon -icrnl time 0 min 0
   fi
 }
 
-resetTTY() {
+reset_tty() {
   if [ -t 0 ]; then stty "$SAVED_STTY"; fi
 }
 
-flushStatus() {
+flush_status() {
   stmt_error=$( { mysql "$@" -h$host $username $password $connect_timeout -N -B -e "FLUSH STATUS;"; } 2>&1)
   if [[ $? -ne 0 ]]; then
     col=0
     echo -e "$(pos 31)$(hr divider_size ' ')$(pos 31)${red_b}ERROR: Failed flushing replication health status - $stmt_error${reset_c}"
     sleep 3
     echo -e "$(pos 31)$(hr divider_size ' ')"
-    printCommands
+    print_commands
   fi
 }
 
-changeWeight() {
-  resetTTY
+change_weight() {
+  reset_tty
   col=0
   echo -e "$(pos 31)$(hr divider_size ' ')$(pos 30)"
-  read -p 'Enter node ID: ' in_nodeID
+  read -p 'Enter node index: ' in_node_index
 
   re='^[0-9]+$'
-  if ! [[ $in_nodeID =~ $re ]] ; then
-    echo -e "$(pos 31)${red_b}ERROR: Not a valid nodeID - $in_nodeID is not a number between 0 and $((host_count-1))${reset_c}"
-    in_nodeID=99
+  if ! [[ $in_node_index =~ $re ]] ; then
+    echo -e "$(pos 31)${red_b}ERROR: Not a valid index - $in_node_index is not a number between 0 and $((host_count-1))${reset_c}"
+    in_node_index=$UNSPECIFIED_NODE
     sleep 3
-  elif [[ $in_nodeID < 0 ]]; then
-    echo -e "$(pos 31)${red_b}ERROR: Not a valid nodeID $in_nodeID < 0${reset_c}"
-    in_nodeID=99
+  elif [[ $in_node_index < 0 ]]; then
+    echo -e "$(pos 31)${red_b}ERROR: Not a valid index $in_node_index < 0${reset_c}"
+    in_node_index=$UNSPECIFIED_NODE
     sleep 3
-  elif [[ $in_nodeID > $(( host_count-1 )) ]] ; then
-    echo -e "$(pos 31)${red_b}ERROR: Not a valid nodeID $in_nodeID > ${reset_c}"
-    in_nodeID=99
+  elif [[ $in_node_index > $(( host_count-1 )) ]] ; then
+    echo -e "$(pos 31)${red_b}ERROR: Not a valid index $in_node_index > ${reset_c}"
+    in_node_index=$UNSPECIFIED_NODE
     sleep 3
   else
     echo -e "$(pos 31)$(hr divider_size ' ')$(pos 30)"
-    read -p 'Enter node weight: ' in_weight
+    read -p 'Enter node weight: ' in_node_weight
 
-    if ! [[ $in_weight =~ $re ]] ; then
-      in_nodeID=99
-      echo -e "$(pos 31)${red_b}ERROR: Not a valid node weight <$in_weight>${reset_c}"
+    if ! [[ $in_node_weight =~ $re ]] ; then
+      in_node_index=$UNSPECIFIED_NODE
+      echo -e "$(pos 31)${red_b}ERROR: Not a valid node weight <$in_node_weight>${reset_c}"
       sleep 3
     fi
   fi
 
-  printCommands
-  saveTTY
+  print_commands
+  save_tty
 }
 
-setWeight() {
-  if [[ $counter -eq $in_nodeID ]]; then
+set_weight() {
+  if [[ $counter -eq $in_node_index ]]; then
     col=0
-    echo -e "$(pos 31)$(hr divider_size ' ')$(pos 31)Changing weight of node $in_nodeID to $in_weight..."
-    stmt_error=$( { mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SET GLOBAL wsrep_provider_options='pc.weight=$in_weight';"; } 2>&1)
+    echo -e "$(pos 31)$(hr divider_size ' ')$(pos 31)Changing weight of node $in_node_index to $in_node_weight..."
+    stmt_error=$( { mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SET GLOBAL wsrep_provider_options='pc.weight=$in_node_weight';"; } 2>&1)
     if [[ $? -ne 0 ]]; then
       echo -e "$(pos 31)$(hr divider_size ' ')$(pos 31)${red_b}ERROR: Failed setting node weight - $stmt_error${reset_c}"
-      in_nodeID=-99
+      in_node_index=$UPDATE_WEIGHT_ERROR
     else 
-      in_nodeID=99
+      in_node_index=$UNSPECIFIED_NODE
     fi
     sleep 3
-    printCommands
+    print_commands
   fi
 }
 
-printCommands() {
+print_commands() {
   col=0
-  if [[ $in_nodeID -eq -99 ]]; then
+  if [[ $in_node_index -eq $UPDATE_WEIGHT_ERROR ]]; then
     echo -e "$(pos 31)${invert_on}Commands: Q -> Quit | R -> Reset replication health status${reset_c}"
   else
     echo -e "$(pos 31)${invert_on}Commands: Q -> Quit | W -> Change node weight | R -> Reset replication health status${reset_c}"
@@ -374,22 +381,22 @@ update_terminal_width() {
   terminal_width=$(stty size | cut -d' ' -f2)
   if [[ $terminal_width -ne $last_terminal_width ]]; then
     clear
-    printCommands
+    print_commands
     print_header
     last_terminal_width=$terminal_width
-    col_width=$(( (terminal_width - margin_left) / host_count ))
+    col_width=$(( (terminal_width - MARGIN_LEFT) / host_count ))
     if [[ $col_width > 34 ]]; then
       col_width=34
     fi
-    width_needed=$(( margin_left + col_width * host_count))
+    width_needed=$(( MARGIN_LEFT + col_width * host_count))
     print_dividers
   fi
 }
 
-checkPrivileges() {
+check_privileges() {
   grants=$(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW GRANTS;" 2> /dev/null)
   if ! [[ $grants == *"ALL PRIVILEGES"* || $grants = *"SYSTEM_VARIABLES_ADMIN"* || $grants = *"SUPER"* ]]; then
-    in_nodeID=-99
+    in_node_index=$UPDATE_WEIGHT_ERROR
   fi
 }
 
@@ -419,30 +426,30 @@ for i in "$@"; do
 done
 set -- "${mysql_options[@]}"
 
-colors
+init_colors
 clear
 
 if [[ "$hosts" != "" ]]; then
   hosts=${hosts//,/ }
 else
-  localconfig=$(mysqld --verbose --help 2> /dev/null | grep -e "^wsrep")
+  local_service_config=$(mysqld --verbose --help 2> /dev/null | grep -e "^wsrep")
 
-  hosts=$(echo -e "$localconfig" | grep gcomm:// | cut -d/ -f3 | tr ',' ' ')
-  sst_method=$(echo -e "$localconfig" | grep sst-method | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)
+  hosts=$(echo -e "$local_service_config" | grep gcomm:// | cut -d/ -f3 | tr ',' ' ')
+  sst_method=$(echo -e "$local_service_config" | grep sst-method | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)
   if [[ "$sst_method" == "mariabackup" || "$sst_method" == "xtrabackup" ]]; then
-    username="-u$(echo -e "$localconfig" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)"
-    password="-p$(echo -e "$localconfig" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f2)"
+    username="-u$(echo -e "$local_service_config" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)"
+    password="-p$(echo -e "$local_service_config" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f2)"
   fi
 fi
 host_count=$(wc -w < <(echo $hosts))
 
 for host in $hosts; do
-  checkPrivileges
+  check_privileges
   break;
 done
 
 if [[ "$follow" == "true" ]]; then
-  printCommands
+  print_commands
 fi
 
 if [[ $@ == *"-u"* || $@ = *"--user"* ]]; then
@@ -456,7 +463,7 @@ if [[ $@ = *"--connect-timeout="* ]]; then
   connect_timeout=""
 fi
 
-saveTTY
+save_tty
 
 declare -a last_cluster_conf_ids
 last_cluster_conf_ids=()
@@ -469,17 +476,17 @@ while [ "x$keypress" != "xq" ]; do
   for host in $hosts; do
     update_terminal_width
 
-    setWeight $@
-    showStatus $@
+    set_weight $@
+    show_status $@
     counter=$((counter+1))
     keypress="`cat -v`"
     if [[ "x$keypress" == "xq" || "x$keypress" == "xQ" ]]; then
       break;
     elif [[ "x$keypress" == "xr" || "x$keypress" == "xR" ]]; then
-      flushStatus 
+      flush_status 
     elif [[ "x$keypress" == "xw" || "x$keypress" == "xW" ]]; then
-      if [[ $in_nodeID -ne -99 ]]; then
-        changeWeight
+      if [[ $in_node_index -ne $UPDATE_WEIGHT_ERROR ]]; then
+        change_weight
       fi
     fi
   done
@@ -488,7 +495,7 @@ while [ "x$keypress" != "xq" ]; do
   fi
 done
 
-resetTTY
+reset_tty
 
 col=0
 echo -e "$(pos 31)$(hr divider_size ' ')"

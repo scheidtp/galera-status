@@ -19,8 +19,12 @@ manually.
 If you're running the script from another machine, you can specify the list of hosts using
 the --hosts parameter.
 
-During follow-mode you can press 'r' to reset the cluster's replication health status,
-or 'q' to quit the script.
+During follow-mode you can press 'r' to reset the cluster's replication health status
+or 'q' to quit the script. You can also change a node's weight by pressing 'w', if the 
+database account used has the privilege to change global variables. When chaning a node's
+weight, the script asks for the node's index and new weight. The first node has the index
+**0**, the second node hast the index **1** and so on. The node's weight must be specified
+as integer value >= 0.
 
 # Screenshot
 ![screenshot](screenshot.png)
