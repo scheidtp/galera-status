@@ -107,7 +107,7 @@ flow control paused:
 flow control sent..:
 send queue avg.....:
 recv queue avg.....:
-potential # threads:
+pot./act. # threads:
 
 ${bold_on}${gray_f}CLUSTER INTEGRITY (should be the same on all nodes)${reset_c}
 
@@ -145,7 +145,7 @@ $(pos 20)$(hr $col_width ' ')$(pos 20)$flow_control_paused
 $(pos 21)$(hr $col_width ' ')$(pos 21)$flow_control_sent
 $(pos 22)$(hr $col_width ' ')$(pos 22)$local_send_queue_avg
 $(pos 23)$(hr $col_width ' ')$(pos 23)$local_recv_queue_avg
-$(pos 24)$(hr $col_width ' ')$(pos 24)$cert_deps_distance
+$(pos 24)$(hr $col_width ' ')$(pos 24)${cert_deps_distance%.*}/$slave_threads
 $(pos 28)$(hr $col_width ' ')$(pos 28)$cluster_conf_id_out
 $(pos 29)$(hr $col_width ' ')$(pos 29)$last_committed
 "
