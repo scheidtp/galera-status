@@ -13,6 +13,8 @@ UNSPECIFIED_NODE=99
 UPDATE_WEIGHT_ERROR=-1
 MARGIN_LEFT=23
 
+CMD_ROW=31
+
 col_width=34
 last_terminal_width=0
 width_needed=1000
@@ -89,7 +91,7 @@ ${bold_on}${gray_f}$(pos 2)NODE INFORMATION:${reset_c}
 
 host...............:
 mysqld reachable...:
-node name..........:
+node index/name....:
 last updated.......:
 
 ${bold_on}${gray_f}NODE STATUS:${reset_c}
@@ -145,7 +147,7 @@ $(pos 20)$(hr $col_width ' ')$(pos 20)$flow_control_paused
 $(pos 21)$(hr $col_width ' ')$(pos 21)$flow_control_sent
 $(pos 22)$(hr $col_width ' ')$(pos 22)$local_send_queue_avg
 $(pos 23)$(hr $col_width ' ')$(pos 23)$local_recv_queue_avg
-$(pos 24)$(hr $col_width ' ')$(pos 24)${cert_deps_distance%.*}/$slave_threads
+$(pos 24)$(hr $col_width ' ')$(pos 24)${cert_deps_distance%.*}$slave_threads
 $(pos 28)$(hr $col_width ' ')$(pos 28)$cluster_conf_id_out
 $(pos 29)$(hr $col_width ' ')$(pos 29)$last_committed
 "
@@ -184,6 +186,7 @@ update_variables() {
   local_send_queue_avg=""
   local_recv_queue_avg=""
   cert_deps_distance=""
+  slave_threads=""
   cluster_conf_id=""
   last_committed=""
   provider_options=""
@@ -285,6 +288,14 @@ update_variables() {
       fi
     done
   fi
+
+  if ! [[ "$slave_threads" == "" ]]; then
+    slave_threads="/$slave_threads"
+  fi
+  if ! [[ "$node_name" == "" ]]; then
+    node_name="$(( counter+1 ))/$node_name"
+  fi
+  node_name=${node_name:0:max_len}
 }
 
 show_status() {
@@ -307,13 +318,23 @@ reset_tty() {
   if [ -t 0 ]; then stty "$SAVED_STTY"; fi
 }
 
+cmd_row() {
+  c_row=$CMD_ROW
+  if ! [[ "$1" == "" ]]; then
+    sub=$1
+    c_row=$((c_row-sub))
+  fi
+
+  echo "$(pos $c_row)"
+}
+
 flush_status() {
   stmt_error=$( { mysql "$@" -h$host $username $password $connect_timeout -N -B -e "FLUSH STATUS;"; } 2>&1)
   if [[ $? -ne 0 ]]; then
     col=0
-    echo -e "$(pos 31)$(hr divider_size ' ')$(pos 31)${red_b}ERROR: Failed flushing replication health status - $stmt_error${reset_c}"
+    echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row)${red_b}ERROR: Failed flushing replication health status - $stmt_error${reset_c}"
     sleep 3
-    echo -e "$(pos 31)$(hr divider_size ' ')"
+    echo -e "$(cmd_row)$(hr divider_size ' ')"
     print_commands
   fi
 }
@@ -321,29 +342,29 @@ flush_status() {
 change_weight() {
   reset_tty
   col=0
-  echo -e "$(pos 31)$(hr divider_size ' ')$(pos 30)"
+  echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row 1)"
   read -p 'Enter node index: ' in_node_index
 
   re='^[0-9]+$'
   if ! [[ $in_node_index =~ $re ]] ; then
-    echo -e "$(pos 31)${red_b}ERROR: Not a valid index - $in_node_index is not a number between 0 and $((host_count-1))${reset_c}"
+    echo -e "$(cmd_row)${red_b}ERROR: Not a valid index - $in_node_index is not a number between 1 and $host_count${reset_c}"
     in_node_index=$UNSPECIFIED_NODE
     sleep 3
-  elif [[ $in_node_index < 0 ]]; then
-    echo -e "$(pos 31)${red_b}ERROR: Not a valid index $in_node_index < 0${reset_c}"
+  elif [[ $in_node_index < 1 ]]; then
+    echo -e "$(cmd_row)${red_b}ERROR: Not a valid index $in_node_index < 1${reset_c}"
     in_node_index=$UNSPECIFIED_NODE
     sleep 3
-  elif [[ $in_node_index > $(( host_count-1 )) ]] ; then
-    echo -e "$(pos 31)${red_b}ERROR: Not a valid index $in_node_index > ${reset_c}"
+  elif [[ $in_node_index > $host_count ]] ; then
+    echo -e "$(cmd_row)${red_b}ERROR: Not a valid index $in_node_index > $host_count${reset_c}"
     in_node_index=$UNSPECIFIED_NODE
     sleep 3
   else
-    echo -e "$(pos 31)$(hr divider_size ' ')$(pos 30)"
+    echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row 1)"
     read -p 'Enter node weight: ' in_node_weight
 
     if ! [[ $in_node_weight =~ $re ]] ; then
       in_node_index=$UNSPECIFIED_NODE
-      echo -e "$(pos 31)${red_b}ERROR: Not a valid node weight <$in_node_weight>${reset_c}"
+      echo -e "$(cmd_row)${red_b}ERROR: Not a valid node weight <$in_node_weight>${reset_c}"
       sleep 3
     fi
   fi
@@ -353,12 +374,12 @@ change_weight() {
 }
 
 set_weight() {
-  if [[ $counter -eq $in_node_index ]]; then
+  if [[ $(( counter+1 )) -eq $in_node_index ]]; then
     col=0
-    echo -e "$(pos 31)$(hr divider_size ' ')$(pos 31)Changing weight of node $in_node_index to $in_node_weight..."
+    echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row)Changing weight of node $in_node_index to $in_node_weight..."
     stmt_error=$( { mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SET GLOBAL wsrep_provider_options='pc.weight=$in_node_weight';"; } 2>&1)
     if [[ $? -ne 0 ]]; then
-      echo -e "$(pos 31)$(hr divider_size ' ')$(pos 31)${red_b}ERROR: Failed setting node weight - $stmt_error${reset_c}"
+      echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row)${red_b}ERROR: Failed setting node weight - $stmt_error${reset_c}"
       in_node_index=$UPDATE_WEIGHT_ERROR
     else 
       in_node_index=$UNSPECIFIED_NODE
@@ -371,9 +392,9 @@ set_weight() {
 print_commands() {
   col=0
   if [[ $in_node_index -eq $UPDATE_WEIGHT_ERROR ]]; then
-    echo -e "$(pos 31)${invert_on}Commands: Q -> Quit | R -> Reset replication health status${reset_c}"
+    echo -e "$(cmd_row)${invert_on}Commands: Q -> Quit | R -> Reset replication health status${reset_c}"
   else
-    echo -e "$(pos 31)${invert_on}Commands: Q -> Quit | W -> Change node weight | R -> Reset replication health status${reset_c}"
+    echo -e "$(cmd_row)${invert_on}Commands: Q -> Quit | W -> Change node weight | R -> Reset replication health status${reset_c}"
   fi
 }
 
@@ -498,6 +519,6 @@ done
 reset_tty
 
 col=0
-echo -e "$(pos 31)$(hr divider_size ' ')"
+echo -e "$(cmd_row)$(hr divider_size ' ')"
 
 exit 0
