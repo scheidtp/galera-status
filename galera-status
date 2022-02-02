@@ -61,27 +61,19 @@ EOT
 }
 
 init_colors() {
-  escape="\033";
+  esc="\033";
 
-  black_f="${escape}[30m"; red_f="${escape}[31m"; green_f="${escape}[32m";
-  yellow_f="${escape}[33m"; blue_f="${escape}[34m"; purple_f="${escape}[35m";
-  cyan_f="${escape}[36m"; white_f="${escape}[37m"; gray_f="${escape}[30m";
+  red_f="${esc}[31m"; green_f="${esc}[32m"; yellow_f="${esc}[33m"; gray_f="${esc}[30m";
 
-  black_b="${escape}[40m"; red_b="${escape}[41m"; green_b="${escape}[42m";
-  yellow_b="${escape}[43m"; blue_b="${escape}[44m"; purple_b="${escape}[45m";
-  cyan_b="${escape}[46m"; white_b="${escape}[47m";
+  red_b="${esc}[41m";
 
-  bold_on="${escape}[1m"; bold_off="${escape}[22m";
-  italic_on="${escape}[3m"; italics_off="${escape}[23m";
-  underline_on="${escape}[4m"; underline_off="${escape}[24m";
-  blink_on="${escape}[5m"; blink_off="${escape}[25m";
-  invert_on="${escape}[7m"; invert_off="${escape}[27m";
+  bold_on="${esc}[1m"; invert_on="${esc}[7m";
 
-  reset_c="${escape}[0m";
+  reset_c="${esc}[0m";
 } 
 
 pos() {
-  echo "${escape}[$1;${col}H"
+  echo "${esc}[$1;${col}H"
 }
 
 print_header() {
@@ -126,7 +118,7 @@ print_dividers() {
 
 print_values() {
   # Removes last-updated-marker
-  for (( i=0; i<$host_count; i++)); do
+  for (( i = 0; i < host_count; i++)); do
     col=$((i * col_width + MARGIN_LEFT + ${#update_date}))
     echo -e "$(pos 7)  "
   done
@@ -253,7 +245,7 @@ update_variables() {
 
   if [[ "$local_send_queue_avg" != "" ]]; then
     local_send_queue_avg=$(unsci $local_send_queue_avg)
-    if [[ $(bc -l <<< $local_send_queue_avg*10) > '1' ]]; then
+    if [[ $(bc -l <<< $local_send_queue_avg*10) -gt 1 ]]; then
       local_send_queue_avg="${bold_on}${red_f}${local_send_queue_avg:0:$max_len}${reset_c}"
     else
       local_send_queue_avg=${local_send_queue_avg:0:$max_len}
@@ -262,7 +254,7 @@ update_variables() {
 
   if [[ "$local_recv_queue_avg" != "" ]]; then
     local_recv_queue_avg=$(unsci $local_recv_queue_avg)
-    if [[ $(bc -l <<< $local_recv_queue_avg*10) > '1' ]]; then
+    if [[ $(bc -l <<< $local_recv_queue_avg*10) -gt 1 ]]; then
       local_recv_queue_avg="${bold_on}${red_f}${local_recv_queue_avg:0:$max_len}${reset_c}"
     else
       local_recv_queue_avg=${local_recv_queue_avg:0:$max_len}
@@ -308,6 +300,7 @@ show_status() {
 }
 
 save_tty() {
+  trap reset_tty SIGINT SIGTERM ERR EXIT
   if [ -t 0 ]; then
     SAVED_STTY="`stty -g`"
     stty -echo -icanon -icrnl time 0 min 0
@@ -315,7 +308,10 @@ save_tty() {
 }
 
 reset_tty() {
-  if [ -t 0 ]; then stty "$SAVED_STTY"; fi
+  trap - SIGINT SIGTERM ERR EXIT
+  if [ -t 0 ]; then
+    stty "$SAVED_STTY"
+  fi
 }
 
 cmd_row() {
@@ -350,11 +346,11 @@ change_weight() {
     echo -e "$(cmd_row)${red_b}ERROR: Not a valid index - $in_node_index is not a number between 1 and $host_count${reset_c}"
     in_node_index=$UNSPECIFIED_NODE
     sleep 3
-  elif [[ $in_node_index < 1 ]]; then
+  elif [[ in_node_index -lt 1 ]]; then
     echo -e "$(cmd_row)${red_b}ERROR: Not a valid index $in_node_index < 1${reset_c}"
     in_node_index=$UNSPECIFIED_NODE
     sleep 3
-  elif [[ $in_node_index > $host_count ]] ; then
+  elif [[ in_node_index -gt host_count ]] ; then
     echo -e "$(cmd_row)${red_b}ERROR: Not a valid index $in_node_index > $host_count${reset_c}"
     in_node_index=$UNSPECIFIED_NODE
     sleep 3
@@ -465,7 +461,7 @@ fi
 host_count=$(wc -w < <(echo $hosts))
 
 for host in $hosts; do
-  check_privileges
+  check_privileges "$@"
   break;
 done
 
@@ -497,14 +493,14 @@ while [ "x$keypress" != "xq" ]; do
   for host in $hosts; do
     update_terminal_width
 
-    set_weight $@
-    show_status $@
+    set_weight "$@"
+    show_status "$@"
     counter=$((counter+1))
     keypress="`cat -v`"
     if [[ "x$keypress" == "xq" || "x$keypress" == "xQ" ]]; then
       break;
     elif [[ "x$keypress" == "xr" || "x$keypress" == "xR" ]]; then
-      flush_status 
+      flush_status "$@"
     elif [[ "x$keypress" == "xw" || "x$keypress" == "xW" ]]; then
       if [[ $in_node_index -ne $UPDATE_WEIGHT_ERROR ]]; then
         change_weight
