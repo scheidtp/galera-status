@@ -236,7 +236,7 @@ update_variables() {
 
   if [[ "$flow_control_paused" != "" ]]; then
     flow_control_paused=$(unsci $flow_control_paused)
-    if [[ $(bc -l <<< $flow_control_paused*10) > '1' ]]; then
+    if [[ $(bc -l <<< "$flow_control_paused*10 > 1") == 1 ]]; then
       flow_control_paused="${bold_on}${red_f}${flow_control_paused:0:$max_len}${reset_c}"
     else
       flow_control_paused=${flow_control_paused:0:$max_len}
@@ -245,7 +245,7 @@ update_variables() {
 
   if [[ "$local_send_queue_avg" != "" ]]; then
     local_send_queue_avg=$(unsci $local_send_queue_avg)
-    if [[ $(bc -l <<< $local_send_queue_avg*10) -gt 1 ]]; then
+    if [[ $(bc -l <<< "$local_send_queue_avg*10 > 1") == 1 ]]; then
       local_send_queue_avg="${bold_on}${red_f}${local_send_queue_avg:0:$max_len}${reset_c}"
     else
       local_send_queue_avg=${local_send_queue_avg:0:$max_len}
@@ -254,7 +254,7 @@ update_variables() {
 
   if [[ "$local_recv_queue_avg" != "" ]]; then
     local_recv_queue_avg=$(unsci $local_recv_queue_avg)
-    if [[ $(bc -l <<< $local_recv_queue_avg*10) -gt 1 ]]; then
+    if [[ $(bc -l <<< "$local_recv_queue_avg*10 > 1") == 1 ]]; then
       local_recv_queue_avg="${bold_on}${red_f}${local_recv_queue_avg:0:$max_len}${reset_c}"
     else
       local_recv_queue_avg=${local_recv_queue_avg:0:$max_len}
