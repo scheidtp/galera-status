@@ -187,19 +187,19 @@ update_variables() {
   update_date=$(date '+%H:%M:%S')
   update_date=${update_date:0:$((max_len-2))}
 
-  while read line; do
-    varname=$(echo "$line" | cut -f 1)
+  while read varname value; do
+#    varname=$(echo "$line" | cut -f 1)
     varname=${varname/wsrep_}
-    value=$(echo "$line" | cut -f 2 | sed "s/'//g")
+#    value=$(echo "$line" | cut -f 2 | sed "s/'//g")
     eval "$varname='$value'"
-  done < <(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW STATUS LIKE 'wsrep_%';" 2> /dev/null)
+  done < <(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW STATUS LIKE 'wsrep_%'; SHOW VARIABLES LIKE 'wsrep_%';" 2> /dev/null)
 
-  while read line; do
-    varname=$(echo "$line" | cut -f 1)
-    varname=${varname/wsrep_}
-    value=$(echo "$line" | cut -f 2 | sed "s/'//g")
-    eval "$varname='$value'"
-  done < <(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW VARIABLES LIKE 'wsrep_%';" 2> /dev/null) 
+#  while read line; do
+#    varname=$(echo "$line" | cut -f 1)
+#    varname=${varname/wsrep_}
+#    value=$(echo "$line" | cut -f 2 | sed "s/'//g")
+#    eval "$varname='$value'"
+#  done < <(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW VARIABLES LIKE 'wsrep_%';" 2> /dev/null) 
 
   if [[ $cluster_status == 'Primary' ]]; then
     cluster_status="${bold_on}${green_f}${cluster_status:0:$max_len}${reset_c}"
@@ -447,7 +447,7 @@ init_colors
 clear
 
 if [[ "$hosts" != "" ]]; then
-  hosts=${hosts//,/ }
+  hosts=(${hosts//,/ })
 else
   local_service_config=$(mysqld --verbose --help 2> /dev/null | grep -e "^wsrep")
 
@@ -458,9 +458,9 @@ else
     password="-p$(echo -e "$local_service_config" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f2)"
   fi
 fi
-host_count=$(wc -w < <(echo $hosts))
+host_count="${#hosts[@]}"
 
-for host in $hosts; do
+for host in ${hosts[@]}; do
   check_privileges "$@"
   break;
 done
@@ -490,7 +490,7 @@ done
 
 while [ "x$keypress" != "xq" ]; do
   counter=0
-  for host in $hosts; do
+  for host in ${hosts[@]}; do
     update_terminal_width
 
     set_weight "$@"
