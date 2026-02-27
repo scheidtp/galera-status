@@ -191,7 +191,7 @@ update_variables() {
     varname=${varname/wsrep_}
 #    value=$(echo "$line" | cut -f 2 | sed "s/'//g")
     eval "$varname='$value'"
-  done < <(mysql "$@" -h"$host" "$username" "$password" $connect_timeout -N -B -e "SHOW STATUS LIKE 'wsrep_%'; SHOW VARIABLES LIKE 'wsrep_%';" 2> /dev/null)
+  done < <(mysql "$@" -h "$host" "$username" "$password" $connect_timeout -N -B -e "SHOW STATUS LIKE 'wsrep_%'; SHOW VARIABLES LIKE 'wsrep_%';" 2> /dev/null)
 
 #  while read line; do
 #    varname=$(echo "$line" | cut -f 1)
@@ -324,7 +324,7 @@ cmd_row() {
 }
 
 flush_status() {
-  if ! stmt_error=$( { mysql "$@" -h"$host" "$username" "$password" $connect_timeout -N -B -e "FLUSH STATUS;"; } 2>&1); then
+  if ! stmt_error=$( { mysql "$@" -h "$host" "$username" "$password" $connect_timeout -N -B -e "FLUSH STATUS;"; } 2>&1); then
     col=0
     echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row)${red_b}ERROR: Failed flushing replication health status - $stmt_error${reset_c}"
     sleep 3
@@ -371,7 +371,7 @@ set_weight() {
   if [[ $(( counter+1 )) -eq $in_node_index ]]; then
     col=0
     echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row)Changing weight of node $in_node_index to $in_node_weight..."
-    if ! stmt_error=$( { mysql "$@" -h"$host" "$username" "$password" $connect_timeout -N -B -e "SET GLOBAL wsrep_provider_options='pc.weight=$in_node_weight';"; } 2>&1); then
+    if ! stmt_error=$( { mysql "$@" -h "$host" "$username" "$password" $connect_timeout -N -B -e "SET GLOBAL wsrep_provider_options='pc.weight=$in_node_weight';"; } 2>&1); then
       echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row)${red_b}ERROR: Failed setting node weight - $stmt_error${reset_c}"
       in_node_index=$UPDATE_WEIGHT_ERROR
     else 
@@ -407,7 +407,7 @@ update_terminal_width() {
 }
 
 check_privileges() {
-  grants=$(mysql "$@" -h"$host" "$username" "$password" $connect_timeout -N -B -e "SHOW GRANTS;" 2> /dev/null)
+  grants=$(mysql "$@" -h "$host" "$username" "$password" $connect_timeout -N -B -e "SHOW GRANTS;" 2> /dev/null)
   if ! [[ $grants == *"ALL PRIVILEGES"* || $grants = *"SYSTEM_VARIABLES_ADMIN"* || $grants = *"SUPER"* ]]; then
     in_node_index=$UPDATE_WEIGHT_ERROR
   fi
@@ -446,11 +446,11 @@ if [[ "$hosts" != "" ]]; then
 else
   local_service_config=$(mysqld --verbose --help 2> /dev/null | grep -e "^wsrep")
 
-  IFS=' ' read -ra hosts <<< "$(echo -e "$local_service_config" | grep gcomm:// | cut -d/ -f3 | tr ',' ' ')"
-  sst_method=$(echo -e "$local_service_config" | grep sst-method | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)
+  IFS=' ' read -ra hosts <<< "$(echo "$local_service_config" | grep gcomm:// | cut -d/ -f3 | tr ',' ' ')"
+  sst_method=$(echo "$local_service_config" | grep sst-method | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)
   if [[ "$sst_method" == "mariabackup" || "$sst_method" == "xtrabackup" ]]; then
-    username="-u$(echo -e "$local_service_config" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)"
-    password="-p$(echo -e "$local_service_config" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f2)"
+    username="-u$(echo "$local_service_config" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)"
+    password="-p$(echo "$local_service_config" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f2)"
   fi
 fi
 host_count="${#hosts[@]}"
@@ -464,16 +464,18 @@ if [[ "$follow" == "true" ]]; then
   print_commands
 fi
 
-if [[ "$*" == *"-u"* || "$*" == *"--user"* ]]; then
-  username=""
-fi
-if [[ "$*" == *"-p"* || "$*" == *"--password"* ]]; then
-  password=""
-fi
-
-if [[ "$*" == *"--connect-timeout="* ]]; then
-  connect_timeout=""
-fi
+# Check if username/password flags are in the arguments, if so don't override them
+for arg in "$@"; do
+  if [[ "$arg" == "-u"* || "$arg" == "--user"* ]]; then
+    username=""
+  fi
+  if [[ "$arg" == "-p"* || "$arg" == "--password"* ]]; then
+    password=""
+  fi
+  if [[ "$arg" == "--connect-timeout="* ]]; then
+    connect_timeout=""
+  fi
+done
 
 save_tty
 
