@@ -265,7 +265,7 @@ update_variables() {
   fi
 
   if [[ "$provider_options" != "" ]]; then
-    node_weight=$(get_value_from_provider_options pc.weight)/${cluster_weight:-0}
+    node_weight=$(get_value_from_provider_options pc.weight)/${cluster_weight:-1}
   fi
 
   cluster_conf_id_out=${bold_on}${green_f}${cluster_conf_id:0:max_len}${reset_c}
@@ -482,7 +482,7 @@ save_tty
 declare -a last_cluster_conf_ids
 last_cluster_conf_ids=()
 for (( c=0;c < host_count; c++)); do
-  last_cluster_conf_ids+=("")
+  last_cluster_conf_ids[c]=""
 done
 
 while [ "x$keypress" != "xq" ]; do
