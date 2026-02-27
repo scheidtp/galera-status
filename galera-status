@@ -17,7 +17,6 @@ CMD_ROW=31
 
 col_width=34
 last_terminal_width=0
-width_needed=1000
 in_node_index=$UNSPECIFIED_NODE
 
 keypress=''
@@ -147,21 +146,21 @@ $(pos 29)$(hr $col_width ' ')$(pos 29)$last_committed
 
 hr() {
   for (( i=0; i<$1; i++)); do
-    printf "$2"
+    printf '%s' "$2"
   done
 }
 
 unsci() {
   shopt -s extglob
-  unscivalue=$(bc -l <<< $(sed -E 's/([+-]?[0-9.]+)[eE]\+?(-?)([0-9]+)/(\1*10^\2\3)/g' <<< $1))
+  unscivalue=$(bc -l <<< "$(sed -E 's/([+-]?[0-9.]+)[eE]\+?(-?)([0-9]+)/(\1*10^\2\3)/g' <<< "$1")")
   # trim some trailing zeros
   echo "${unscivalue%%+(00)}"
   shopt -u extglob
 }
 
 get_value_from_provider_options() {
-  po_value=$(echo $provider_options | tr ';' '\n' | grep $1 | cut -d '=' -f2)
-  echo $po_value
+  po_value=$(echo "$provider_options" | tr ';' '\n' | grep "$1" | cut -d '=' -f2)
+  echo "$po_value"
 }
 
 update_variables() {
@@ -187,12 +186,12 @@ update_variables() {
   update_date=$(date '+%H:%M:%S')
   update_date=${update_date:0:$((max_len-2))}
 
-  while read varname value; do
+  while read -r varname value; do
 #    varname=$(echo "$line" | cut -f 1)
     varname=${varname/wsrep_}
 #    value=$(echo "$line" | cut -f 2 | sed "s/'//g")
     eval "$varname='$value'"
-  done < <(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW STATUS LIKE 'wsrep_%'; SHOW VARIABLES LIKE 'wsrep_%';" 2> /dev/null)
+  done < <(mysql "$@" -h "$host" "$username" "$password" $connect_timeout -N -B -e "SHOW STATUS LIKE 'wsrep_%'; SHOW VARIABLES LIKE 'wsrep_%';" 2> /dev/null)
 
 #  while read line; do
 #    varname=$(echo "$line" | cut -f 1)
@@ -235,7 +234,7 @@ update_variables() {
   esac
 
   if [[ "$flow_control_paused" != "" ]]; then
-    flow_control_paused=$(unsci $flow_control_paused)
+    flow_control_paused=$(unsci "$flow_control_paused")
     if [[ $(bc -l <<< "$flow_control_paused*10 > 1") == 1 ]]; then
       flow_control_paused="${bold_on}${red_f}${flow_control_paused:0:$max_len}${reset_c}"
     else
@@ -244,7 +243,7 @@ update_variables() {
   fi
 
   if [[ "$local_send_queue_avg" != "" ]]; then
-    local_send_queue_avg=$(unsci $local_send_queue_avg)
+    local_send_queue_avg=$(unsci "$local_send_queue_avg")
     if [[ $(bc -l <<< "$local_send_queue_avg*10 > 1") == 1 ]]; then
       local_send_queue_avg="${bold_on}${red_f}${local_send_queue_avg:0:$max_len}${reset_c}"
     else
@@ -253,7 +252,7 @@ update_variables() {
   fi
 
   if [[ "$local_recv_queue_avg" != "" ]]; then
-    local_recv_queue_avg=$(unsci $local_recv_queue_avg)
+    local_recv_queue_avg=$(unsci "$local_recv_queue_avg")
     if [[ $(bc -l <<< "$local_recv_queue_avg*10 > 1") == 1 ]]; then
       local_recv_queue_avg="${bold_on}${red_f}${local_recv_queue_avg:0:$max_len}${reset_c}"
     else
@@ -266,15 +265,15 @@ update_variables() {
   fi
 
   if [[ "$provider_options" != "" ]]; then
-    node_weight=$(get_value_from_provider_options pc.weight)/$cluster_weight
+    node_weight=$(get_value_from_provider_options pc.weight)/${cluster_weight:-1}
   fi
 
   cluster_conf_id_out=${bold_on}${green_f}${cluster_conf_id:0:max_len}${reset_c}
-  last_cluster_conf_ids[$counter]=$cluster_conf_id
+  last_cluster_conf_ids[counter]=$cluster_conf_id
   if [[ "$cluster_conf_id" != "" ]]; then
-    for (( c=0;c<$host_count;c++ )); do
+    for (( c=0;c<host_count;c++ )); do
       if [[ "${last_cluster_conf_ids[c]}" != "" ]]; then
-        if [[ ${last_cluster_conf_ids[c]} != $cluster_conf_id ]]; then
+        if [[ "${last_cluster_conf_ids[c]}" != "$cluster_conf_id" ]]; then
           cluster_conf_id_out=${bold_on}${red_f}${cluster_conf_id:0:max_len}${reset_c}
         fi
       fi
@@ -302,7 +301,7 @@ show_status() {
 save_tty() {
   trap reset_tty SIGINT SIGTERM ERR EXIT
   if [ -t 0 ]; then
-    SAVED_STTY="`stty -g`"
+    SAVED_STTY="$(stty -g)"
     stty -echo -icanon -icrnl time 0 min 0
   fi
 }
@@ -321,12 +320,11 @@ cmd_row() {
     c_row=$((c_row-sub))
   fi
 
-  echo "$(pos $c_row)"
+  pos "$c_row"
 }
 
 flush_status() {
-  stmt_error=$( { mysql "$@" -h$host $username $password $connect_timeout -N -B -e "FLUSH STATUS;"; } 2>&1)
-  if [[ $? -ne 0 ]]; then
+  if ! stmt_error=$( { mysql "$@" -h "$host" "$username" "$password" $connect_timeout -N -B -e "FLUSH STATUS;"; } 2>&1); then
     col=0
     echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row)${red_b}ERROR: Failed flushing replication health status - $stmt_error${reset_c}"
     sleep 3
@@ -339,7 +337,7 @@ change_weight() {
   reset_tty
   col=0
   echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row 1)"
-  read -p 'Enter node index: ' in_node_index
+  read -r -p 'Enter node index: ' in_node_index
 
   re='^[0-9]+$'
   if ! [[ $in_node_index =~ $re ]] ; then
@@ -356,7 +354,7 @@ change_weight() {
     sleep 3
   else
     echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row 1)"
-    read -p 'Enter node weight: ' in_node_weight
+    read -r -p 'Enter node weight: ' in_node_weight
 
     if ! [[ $in_node_weight =~ $re ]] ; then
       in_node_index=$UNSPECIFIED_NODE
@@ -373,8 +371,7 @@ set_weight() {
   if [[ $(( counter+1 )) -eq $in_node_index ]]; then
     col=0
     echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row)Changing weight of node $in_node_index to $in_node_weight..."
-    stmt_error=$( { mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SET GLOBAL wsrep_provider_options='pc.weight=$in_node_weight';"; } 2>&1)
-    if [[ $? -ne 0 ]]; then
+    if ! stmt_error=$( { mysql "$@" -h "$host" "$username" "$password" $connect_timeout -N -B -e "SET GLOBAL wsrep_provider_options='pc.weight=$in_node_weight';"; } 2>&1); then
       echo -e "$(cmd_row)$(hr divider_size ' ')$(cmd_row)${red_b}ERROR: Failed setting node weight - $stmt_error${reset_c}"
       in_node_index=$UPDATE_WEIGHT_ERROR
     else 
@@ -402,16 +399,15 @@ update_terminal_width() {
     print_header
     last_terminal_width=$terminal_width
     col_width=$(( (terminal_width - MARGIN_LEFT) / host_count ))
-    if [[ $col_width > 34 ]]; then
+    if [[ $col_width -gt 34 ]]; then
       col_width=34
     fi
-    width_needed=$(( MARGIN_LEFT + col_width * host_count))
     print_dividers
   fi
 }
 
 check_privileges() {
-  grants=$(mysql "$@" -h$host $username $password $connect_timeout -N -B -e "SHOW GRANTS;" 2> /dev/null)
+  grants=$(mysql "$@" -h "$host" "$username" "$password" $connect_timeout -N -B -e "SHOW GRANTS;" 2> /dev/null)
   if ! [[ $grants == *"ALL PRIVILEGES"* || $grants = *"SYSTEM_VARIABLES_ADMIN"* || $grants = *"SUPER"* ]]; then
     in_node_index=$UPDATE_WEIGHT_ERROR
   fi
@@ -425,7 +421,6 @@ for i in "$@"; do
   case $i in
     --help)
     print_help
-    exit 0
     ;;
     --hosts=*)
     hosts="${i#*=}"
@@ -447,20 +442,20 @@ init_colors
 clear
 
 if [[ "$hosts" != "" ]]; then
-  hosts=(${hosts//,/ })
+  IFS=',' read -ra hosts <<< "$hosts"
 else
   local_service_config=$(mysqld --verbose --help 2> /dev/null | grep -e "^wsrep")
 
-  hosts=$(echo -e "$local_service_config" | grep gcomm:// | cut -d/ -f3 | tr ',' ' ')
-  sst_method=$(echo -e "$local_service_config" | grep sst-method | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)
+  IFS=' ' read -ra hosts <<< "$(echo "$local_service_config" | grep gcomm:// | cut -d/ -f3 | tr ',' ' ')"
+  sst_method=$(echo "$local_service_config" | grep sst-method | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)
   if [[ "$sst_method" == "mariabackup" || "$sst_method" == "xtrabackup" ]]; then
-    username="-u$(echo -e "$local_service_config" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)"
-    password="-p$(echo -e "$local_service_config" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f2)"
+    username="-u$(echo "$local_service_config" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f1)"
+    password="-p$(echo "$local_service_config" | grep sst-auth | tr -s ' ' | cut -d' ' -f2 | cut -d':' -f2)"
   fi
 fi
 host_count="${#hosts[@]}"
 
-for host in ${hosts[@]}; do
+for host in "${hosts[@]}"; do
   check_privileges "$@"
   break;
 done
@@ -469,39 +464,41 @@ if [[ "$follow" == "true" ]]; then
   print_commands
 fi
 
-if [[ $@ == *"-u"* || $@ = *"--user"* ]]; then
-  username=""
-fi
-if [[ $@ == *"-p"* || $@ = *"--password"* ]]; then
-  password=""
-fi
-
-if [[ $@ = *"--connect-timeout="* ]]; then
-  connect_timeout=""
-fi
+# Check if username/password flags are in the arguments, if so don't override them
+for arg in "$@"; do
+  if [[ "$arg" == "-u"* || "$arg" == "--user"* ]]; then
+    username=""
+  fi
+  if [[ "$arg" == "-p"* || "$arg" == "--password"* ]]; then
+    password=""
+  fi
+  if [[ "$arg" == "--connect-timeout="* ]]; then
+    connect_timeout=""
+  fi
+done
 
 save_tty
 
 declare -a last_cluster_conf_ids
 last_cluster_conf_ids=()
-for (( c=0;c < $host_count; c++)); do
-  last_cluster_conf_ids+=""
+for (( c=0;c < host_count; c++)); do
+  last_cluster_conf_ids[c]=""
 done
 
 while [ "x$keypress" != "xq" ]; do
   counter=0
-  for host in ${hosts[@]}; do
+  for host in "${hosts[@]}"; do
     update_terminal_width
 
     set_weight "$@"
     show_status "$@"
     counter=$((counter+1))
-    keypress="`cat -v`"
-    if [[ "x$keypress" == "xq" || "x$keypress" == "xQ" ]]; then
+    keypress="$(cat -v)"
+    if [[ "$keypress" == "q" || "$keypress" == "Q" ]]; then
       break;
-    elif [[ "x$keypress" == "xr" || "x$keypress" == "xR" ]]; then
+    elif [[ "$keypress" == "r" || "$keypress" == "R" ]]; then
       flush_status "$@"
-    elif [[ "x$keypress" == "xw" || "x$keypress" == "xW" ]]; then
+    elif [[ "$keypress" == "w" || "$keypress" == "W" ]]; then
       if [[ $in_node_index -ne $UPDATE_WEIGHT_ERROR ]]; then
         change_weight
       fi
