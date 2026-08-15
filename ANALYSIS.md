@@ -1,7 +1,14 @@
 # galera-status — Code Analysis: Suggested Fixes & Optimizations
 
 Analysis of `galera-status` (v1.1, bash, ~520 lines) as of commit `15b90e7`.
-Findings are ordered by severity. Line numbers refer to the current `galera-status` script.
+Findings are ordered by severity. Line numbers refer to the script *as analyzed*
+(commit `15b90e7`), not the fixed version.
+
+> **Status update:** all findings except 3.6 (dynamic command-row placement) and
+> 4.3 (parallel node polling) have been applied on this branch in the commit
+> following this document. The password handling from 3.1 was implemented via
+> `MYSQL_PWD` rather than a `--defaults-extra-file`, and a `--interval=<seconds>`
+> option was added along with the follow-mode pacing fix (4.2).
 
 ---
 
